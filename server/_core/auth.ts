@@ -87,11 +87,11 @@ export function registerAuthRoutes(app: Express): void {
 
     if (!expectedUsername || !expectedPassword) {
       console.error(
-        "[Auth] APP_USERNAME or APP_PASSWORD is not configured in .env"
+        "[Auth] APP_USERNAME or APP_PASSWORD is not configured in the process environment"
       );
       res.status(500).json({
         error:
-          "Server auth is not configured. Set APP_USERNAME and APP_PASSWORD in .env.",
+          "Server auth is not configured. Set APP_USERNAME and APP_PASSWORD in the service environment.",
       });
       return;
     }
@@ -115,15 +115,21 @@ export function registerAuthRoutes(app: Express): void {
       return;
     }
 
+    let dbError: unknown = null;
     const user = await ensureLocalUser().catch((err) => {
+      dbError = err;
       console.error("[Auth] Failed to ensure local user:", err);
       return null;
     });
 
     if (!user) {
+      const detail =
+        dbError instanceof Error ? dbError.message : String(dbError ?? "");
+      const isProd = process.env.NODE_ENV === "production";
       res.status(503).json({
         error:
-          "Database unavailable. Set DATABASE_URL in .env and run `pnpm db:push` before logging in.",
+          "Database unavailable. Verify DATABASE_URL and run `pnpm db:migrate` against the target database. Check server logs for the underlying error.",
+        ...(isProd || !detail ? {} : { detail }),
       });
       return;
     }

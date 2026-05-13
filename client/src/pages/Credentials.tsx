@@ -45,8 +45,8 @@ export default function CredentialsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">StoreHub API Connection</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          API credentials are read from the server's <code>.env</code> file. Edit{" "}
-          <code>STOREHUB_USERNAME</code> and <code>STOREHUB_API_TOKEN</code> there to change them.
+          API credentials are read from the server's environment. Set{" "}
+          <code>STOREHUB_USERNAME</code> and <code>STOREHUB_API_TOKEN</code> on the host (env file, systemd unit, or panel) to change them.
         </p>
       </div>
 
@@ -60,7 +60,7 @@ export default function CredentialsPage() {
         <Card className="border-green-200 bg-green-50">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2 text-green-800">
-              <CheckCircle2 className="w-4 h-4" /> Credentials Loaded From <code>.env</code>
+              <CheckCircle2 className="w-4 h-4" /> Credentials Loaded From Environment
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -101,8 +101,8 @@ export default function CredentialsPage() {
               <AlertTriangle className="w-4 h-4" /> Credentials Not Configured
             </CardTitle>
             <CardDescription className="text-amber-700">
-              Set <code>STOREHUB_USERNAME</code> and <code>STOREHUB_API_TOKEN</code> in{" "}
-              <code>.env</code>, then restart the server.
+              Set <code>STOREHUB_USERNAME</code> and <code>STOREHUB_API_TOKEN</code> in the
+              service environment, then restart the server.
             </CardDescription>
           </CardHeader>
         </Card>

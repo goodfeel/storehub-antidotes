@@ -31,10 +31,10 @@ export const appRouter = router({
     }),
   }),
 
-  // ─── Credentials (read-only view of .env config) ────────────────────────────
+  // ─── Credentials (read-only view of service-env config) ────────────────────
   credentials: router({
     /**
-     * Reports whether the StoreHub creds are configured in `.env`.
+     * Reports whether the StoreHub creds are configured in the process env.
      * The API token is never returned; only a short mask for confirmation.
      */
     get: protectedProcedure.query(() => {
@@ -100,7 +100,7 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         if (!hasStorehubCredentials()) {
           throw new Error(
-            "StoreHub credentials are not configured. Set STOREHUB_USERNAME and STOREHUB_API_TOKEN in .env."
+            "StoreHub credentials are not configured. Set STOREHUB_USERNAME and STOREHUB_API_TOKEN in the service environment."
           );
         }
 

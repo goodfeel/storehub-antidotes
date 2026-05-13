@@ -23,7 +23,7 @@ export function getStorehubCredentials(): StorehubCredentials {
   const apiToken = ENV.storehubApiToken.trim();
   if (!username || !apiToken) {
     throw new Error(
-      "StoreHub credentials are not configured. Set STOREHUB_USERNAME and STOREHUB_API_TOKEN in .env."
+      "StoreHub credentials are not configured. Set STOREHUB_USERNAME and STOREHUB_API_TOKEN in the service environment."
     );
   }
   return { username, apiToken };

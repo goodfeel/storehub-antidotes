@@ -61,8 +61,8 @@ async function checkAndRunScheduledExports(): Promise<void> {
   const db = await getDb();
   if (!db) return;
 
-  // StoreHub credentials now come from .env; if they're missing there's no
-  // point iterating scheduled configs because every job would fail anyway.
+  // StoreHub credentials come from the service environment; if they're missing
+  // there's no point iterating scheduled configs because every job would fail.
   if (!hasStorehubCredentials()) return;
 
   const bangkokNow = nowInBangkok();
