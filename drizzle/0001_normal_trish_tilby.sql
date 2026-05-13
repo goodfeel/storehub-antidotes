@@ -1,0 +1,1 @@
+DROP TABLE "storehub_credentials" CASCADE;

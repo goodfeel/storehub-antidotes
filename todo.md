@@ -1,0 +1,23 @@
+# StoreHub Export App TODO
+
+- [x] Database schema: credentials, export_jobs, export_files tables
+- [x] StoreHub API service: fetch stores, transactions (paginated), inventory
+- [x] tRPC procedures: credentials CRUD, manual export trigger, scheduler config, export history
+- [x] Weekly scheduler with configurable frequency (cron-based, server-side)
+- [x] CSV generation: transactions CSV and inventory CSV per export run, labeled by store
+- [x] S3 upload for generated CSV files
+- [x] Export history page with download links
+- [x] Dashboard UI: credentials form, export controls, schedule settings, history table
+- [x] Error handling and retry logic with rate limiting (3 calls/sec)
+- [x] Email notification to owner on export complete/fail
+- [x] Vitest tests for core procedures
+- [x] Fix: export job ID returns undefined in toast and job polling (insertId not extracted correctly from MySQL result)
+- [x] Fix: createExportFile inserts jobId as DEFAULT instead of actual job ID (resolved by insertId fix)
+- [x] Fix: inventory CSV is empty (70 bytes, header only) — API endpoint or parameters incorrect
+- [x] Enrich inventory CSV: add Product Name, SKU, Barcode, Cost, Price (tax-excluded), Cost*Qty, Price*Qty, Margin, Category, Product Tags, Suppliers via Products API
+- [x] Add Sales Summary CSV: aggregate transactions by product with columns Product Name, Category, SKU, SKU ID, Total Items Sold, Total Sales, Total Sales Returned, Total Discount, Discount%, Item Net Sales, Average Cost, Average Net Sales, Gross Profit, Gross Profit%
+- [x] Fix: Sales Summary download link not showing in Export History (timing issue - resolved, next export will show all 3 links)
+- [x] Fix: Sales Summary CSV column mapping and formulas to match StoreHub back-office format exactly (per-store breakdown added)
+- [x] Update Sales Summary CSV: break down per store (add Store Name column, one row per product per store)
+- [x] Fix inventory CSV: remove Store Name column (per-product not per-store), fix column order, fix Margin formula, fix tag/supplier splitting to match back-office format
+- [x] Add Store Name as the last column in inventory CSV (each row shows which store the stock belongs to)
