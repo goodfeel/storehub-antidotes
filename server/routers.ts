@@ -1,7 +1,7 @@
 import { clearSessionCookie } from "./_core/auth";
 import { ENV, getStorehubCredentials, hasStorehubCredentials } from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import {
   getSchedulerConfig,
@@ -11,6 +11,13 @@ import {
   getExportJobById,
   getExportFilesByJobId,
   getExportFilesByUserId,
+  listUsers,
+  createUserWithPassword,
+  updateUserPassword,
+  updateUserRole,
+  deleteUserById,
+  countAdmins,
+  getUserById,
 } from "./db";
 import { fetchStores } from "./storehubApi";
 import { runExport } from "./exportRunner";
@@ -32,12 +39,13 @@ export const appRouter = router({
   }),
 
   // ─── Credentials (read-only view of service-env config) ────────────────────
+  // Admin-only: regular users don't need (or should see) the StoreHub key.
   credentials: router({
     /**
      * Reports whether the StoreHub creds are configured in the process env.
      * The API token is never returned; only a short mask for confirmation.
      */
-    get: protectedProcedure.query(() => {
+    get: adminProcedure.query(() => {
       if (!hasStorehubCredentials()) {
         return { configured: false as const };
       }
@@ -51,7 +59,7 @@ export const appRouter = router({
     /**
      * Calls StoreHub `/stores` with the env credentials to verify they work.
      */
-    test: protectedProcedure.mutation(async () => {
+    test: adminProcedure.mutation(async () => {
       const { username, apiToken } = getStorehubCredentials();
       const stores = await fetchStores(username, apiToken);
       return {
@@ -63,8 +71,9 @@ export const appRouter = router({
   }),
 
   // ─── Scheduler ──────────────────────────────────────────────────────────────
+  // Admin-only: regular users can't configure scheduled exports.
   scheduler: router({
-    get: protectedProcedure.query(async ({ ctx }) => {
+    get: adminProcedure.query(async ({ ctx }) => {
       const config = await getSchedulerConfig(ctx.user.id);
       return config ?? {
         enabled: true,
@@ -75,7 +84,7 @@ export const appRouter = router({
       };
     }),
 
-    save: protectedProcedure
+    save: adminProcedure
       .input(z.object({
         enabled: z.boolean(),
         frequencyDays: z.number().int().min(1).max(365),
@@ -89,8 +98,116 @@ export const appRouter = router({
       }),
   }),
 
+  // ─── Users (admin-only) ─────────────────────────────────────────────────────
+  // Lets admins create / delete / reset-password / change-role for other
+  // accounts. Several invariants are enforced:
+  //   * an admin cannot delete themselves
+  //   * an admin cannot demote themselves
+  //   * the last remaining admin cannot be demoted or deleted
+  users: router({
+    list: adminProcedure.query(async () => {
+      return listUsers();
+    }),
+
+    create: adminProcedure
+      .input(
+        z.object({
+          email: z.string().trim().toLowerCase().email(),
+          name: z.string().trim().min(1).max(120),
+          role: z.enum(["admin", "user"]),
+          password: z.string().min(4).max(200),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const user = await createUserWithPassword({
+          email: input.email,
+          name: input.name,
+          role: input.role,
+          plainPassword: input.password,
+        });
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        };
+      }),
+
+    resetPassword: adminProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          password: z.string().min(4).max(200),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const target = await getUserById(input.id);
+        if (!target) throw new Error("User not found");
+        await updateUserPassword(input.id, input.password);
+        return { success: true } as const;
+      }),
+
+    setRole: adminProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          role: z.enum(["admin", "user"]),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const target = await getUserById(input.id);
+        if (!target) throw new Error("User not found");
+
+        if (input.role === target.role) {
+          return { success: true } as const;
+        }
+
+        if (input.role === "user") {
+          if (target.id === ctx.user.id) {
+            throw new Error("You cannot demote your own admin account");
+          }
+          if (target.role === "admin") {
+            const admins = await countAdmins();
+            if (admins <= 1) {
+              throw new Error(
+                "Refusing to demote the last remaining admin"
+              );
+            }
+          }
+        }
+
+        await updateUserRole(input.id, input.role);
+        return { success: true } as const;
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        if (input.id === ctx.user.id) {
+          throw new Error("You cannot delete your own account");
+        }
+        const target = await getUserById(input.id);
+        if (!target) throw new Error("User not found");
+
+        if (target.role === "admin") {
+          const admins = await countAdmins();
+          if (admins <= 1) {
+            throw new Error("Refusing to delete the last remaining admin");
+          }
+        }
+
+        await deleteUserById(input.id);
+        return { success: true } as const;
+      }),
+  }),
+
   // ─── Export ─────────────────────────────────────────────────────────────────
   export: router({
+    /**
+     * Trigger an export. Admins get the full export (transactions + inventory
+     * + sales summary); regular users are forced into inventory-only mode
+     * regardless of what they send.
+     */
     trigger: protectedProcedure
       .input(z.object({
         dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format"),
@@ -104,6 +221,7 @@ export const appRouter = router({
           );
         }
 
+        const inventoryOnly = ctx.user.role !== "admin";
         const jobId = await createExportJob(ctx.user.id, "manual", input.dateFrom, input.dateTo);
 
         // Run export asynchronously – don't await so the UI gets the jobId immediately
@@ -114,11 +232,12 @@ export const appRouter = router({
           dateTo: input.dateTo,
           includeOnline: input.includeOnline,
           triggerType: "manual",
+          inventoryOnly,
         }).catch((err) => {
           console.error(`[Export] Job ${jobId} failed:`, err);
         });
 
-        return { jobId, status: "pending" };
+        return { jobId, status: "pending", inventoryOnly };
       }),
 
     getJob: protectedProcedure
@@ -126,7 +245,10 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         const job = await getExportJobById(input.jobId);
         if (!job || job.userId !== ctx.user.id) throw new Error("Job not found");
-        const files = await getExportFilesByJobId(input.jobId);
+        let files = await getExportFilesByJobId(input.jobId);
+        if (ctx.user.role !== "admin") {
+          files = files.filter((f) => f.fileType === "inventory");
+        }
         return { job, files };
       }),
 
@@ -134,7 +256,10 @@ export const appRouter = router({
       .input(z.object({ limit: z.number().int().min(1).max(100).default(50) }))
       .query(async ({ ctx, input }) => {
         const jobs = await getExportJobs(ctx.user.id, input.limit);
-        const files = await getExportFilesByUserId(ctx.user.id, 200);
+        let files = await getExportFilesByUserId(ctx.user.id, 200);
+        if (ctx.user.role !== "admin") {
+          files = files.filter((f) => f.fileType === "inventory");
+        }
 
         // Attach files to jobs
         const filesByJob = new Map<number, typeof files>();

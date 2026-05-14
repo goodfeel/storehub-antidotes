@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,8 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function HistoryPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const { data: jobs, isLoading, refetch, isFetching } = trpc.export.listJobs.useQuery(
     { limit: 50 },
     { refetchInterval: 10000 } // Auto-refresh every 10s
@@ -102,15 +105,17 @@ export default function HistoryPage() {
               <CardContent className="space-y-3">
                 {/* Stats */}
                 {job.status === "completed" && (
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className={`grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
                     <div className="text-center rounded bg-muted/50 p-2">
                       <p className="text-base font-bold">{job.storeCount ?? 0}</p>
                       <p className="text-xs text-muted-foreground">Stores</p>
                     </div>
-                    <div className="text-center rounded bg-muted/50 p-2">
-                      <p className="text-base font-bold">{(job.transactionCount ?? 0).toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground">Transactions</p>
-                    </div>
+                    {isAdmin && (
+                      <div className="text-center rounded bg-muted/50 p-2">
+                        <p className="text-base font-bold">{(job.transactionCount ?? 0).toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">Transactions</p>
+                      </div>
+                    )}
                     <div className="text-center rounded bg-muted/50 p-2">
                       <p className="text-base font-bold">{(job.inventoryCount ?? 0).toLocaleString()}</p>
                       <p className="text-xs text-muted-foreground">Inventory Items</p>

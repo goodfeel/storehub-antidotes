@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -10,7 +10,9 @@ import {
   type ExportJob,
   type InsertUser,
   type SchedulerConfig,
+  type User,
 } from "../drizzle/schema";
+import { hashPassword } from "./_core/passwordHash";
 
 let _client: ReturnType<typeof postgres> | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -64,6 +66,162 @@ export async function getUserByOpenId(openId: string) {
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getUserById(id: number): Promise<User | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
+export async function getUserByEmail(email: string): Promise<User | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const normalized = email.trim().toLowerCase();
+  const result = await db
+    .select()
+    .from(users)
+    .where(sql`lower(${users.email}) = ${normalized}`)
+    .limit(1);
+  return result[0];
+}
+
+export async function touchUserLastSignedIn(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, id));
+}
+
+/**
+ * Idempotently seed a user record with a password. If the email already exists
+ * the row is left untouched (so an admin who has changed their password isn't
+ * reset on every restart). Returns the resulting row.
+ */
+export async function seedUser(input: {
+  email: string;
+  plainPassword: string;
+  name: string;
+  role: "admin" | "user";
+  openId?: string;
+}): Promise<User | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const email = input.email.trim().toLowerCase();
+  const existing = await getUserByEmail(email);
+  if (existing) return existing;
+
+  const passwordHash = await hashPassword(input.plainPassword);
+  const openId = input.openId ?? `seed:${email}`;
+
+  await db
+    .insert(users)
+    .values({
+      openId,
+      email,
+      passwordHash,
+      name: input.name,
+      role: input.role,
+      loginMethod: "password",
+      lastSignedIn: new Date(),
+    })
+    .onConflictDoNothing({ target: users.email });
+
+  return getUserByEmail(email);
+}
+
+/**
+ * Lists every user, newest first. Includes only the fields safe to surface in
+ * the admin UI; never returns the password hash.
+ */
+export async function listUsers(): Promise<
+  Array<Omit<User, "passwordHash"> & { hasPassword: boolean }>
+> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(users).orderBy(desc(users.createdAt));
+  return rows.map(({ passwordHash, ...rest }) => ({
+    ...rest,
+    hasPassword: Boolean(passwordHash),
+  }));
+}
+
+/**
+ * Creates a new user with a password. Throws if the email is already taken.
+ * `openId` defaults to `manual:<email>` so it doesn't collide with the seed
+ * naming convention.
+ */
+export async function createUserWithPassword(input: {
+  email: string;
+  plainPassword: string;
+  name: string;
+  role: "admin" | "user";
+}): Promise<User> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const email = input.email.trim().toLowerCase();
+  const existing = await getUserByEmail(email);
+  if (existing) {
+    throw new Error(`A user with email "${email}" already exists`);
+  }
+
+  const passwordHash = await hashPassword(input.plainPassword);
+  const inserted = await db
+    .insert(users)
+    .values({
+      openId: `manual:${email}`,
+      email,
+      passwordHash,
+      name: input.name,
+      role: input.role,
+      loginMethod: "password",
+      lastSignedIn: new Date(),
+    })
+    .returning();
+
+  const created = inserted[0];
+  if (!created) throw new Error("Failed to create user");
+  return created;
+}
+
+export async function updateUserPassword(
+  id: number,
+  plainPassword: string
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const passwordHash = await hashPassword(plainPassword);
+  await db
+    .update(users)
+    .set({ passwordHash, loginMethod: "password" })
+    .where(eq(users.id, id));
+}
+
+export async function updateUserRole(
+  id: number,
+  role: "admin" | "user"
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ role }).where(eq(users.id, id));
+}
+
+export async function deleteUserById(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(users).where(eq(users.id, id));
+}
+
+export async function countAdmins(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const rows = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(users)
+    .where(eq(users.role, "admin"));
+  return rows[0]?.count ?? 0;
 }
 
 // ─── Scheduler Config ─────────────────────────────────────────────────────────
@@ -177,6 +335,17 @@ export async function getExportFilesByUserId(userId: number, limit = 100): Promi
     .where(eq(exportFiles.userId, userId))
     .orderBy(desc(exportFiles.createdAt))
     .limit(limit);
+}
+
+export async function getExportFileByKey(key: string): Promise<ExportFile | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db
+    .select()
+    .from(exportFiles)
+    .where(eq(exportFiles.fileKey, key))
+    .limit(1);
+  return result[0];
 }
 
 // Re-export `and` for any external consumers that previously imported it from here.

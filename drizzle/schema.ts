@@ -35,7 +35,10 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
-  email: varchar("email", { length: 320 }),
+  email: varchar("email", { length: 320 }).unique(),
+  // scrypt hash, formatted as "scrypt$<saltHex>$<hashHex>". Null means the
+  // account cannot use the email/password login flow.
+  passwordHash: text("passwordHash"),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: userRole("role").default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

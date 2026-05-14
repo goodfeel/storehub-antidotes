@@ -15,20 +15,23 @@ import { toast } from "sonner";
 import { useLocation } from "wouter";
 
 type LoginResponse =
-  | { success: true; user: { openId: string; name: string } }
+  | {
+      success: true;
+      user: { id: number; email: string | null; name: string | null; role: string };
+    }
   | { success?: false; error?: string };
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const utils = trpc.useUtils();
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!username.trim() || !password) {
-      toast.error("Username and password are required");
+    if (!email.trim() || !password) {
+      toast.error("Email and password are required");
       return;
     }
 
@@ -38,7 +41,7 @@ export default function LoginPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
 
       const data = (await response.json().catch(() => ({}))) as LoginResponse;
@@ -76,12 +79,13 @@ export default function LoginPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
-                id="username"
-                autoComplete="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                id="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 disabled={submitting}
                 required
               />

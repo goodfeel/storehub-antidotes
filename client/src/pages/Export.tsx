@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Download, Loader2, CheckCircle2, XCircle, Clock, FileText, AlertCircle } from "lucide-react";
+import { Download, Loader2, CheckCircle2, XCircle, Clock, FileText, AlertCircle, Boxes } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useLocation } from "wouter";
 
@@ -34,7 +35,13 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function ExportPage() {
   const [, setLocation] = useLocation();
-  const { data: creds } = trpc.credentials.get.useQuery();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  // credentials.get is admin-only on the server; skip it for regular users to
+  // avoid a noisy 403.
+  const { data: creds } = trpc.credentials.get.useQuery(undefined, {
+    enabled: isAdmin,
+  });
 
   const [dateFrom, setDateFrom] = useState(toLocalDateString(7));
   const [dateTo, setDateTo] = useState(toLocalDateString(0));
@@ -71,16 +78,24 @@ export default function ExportPage() {
 
   const handleExport = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!creds) {
+    if (isAdmin && !creds) {
       toast.error("Please configure your API credentials first");
       setLocation("/credentials");
       return;
     }
-    if (dateFrom > dateTo) {
+    if (isAdmin && dateFrom > dateTo) {
       toast.error("Start date must be before end date");
       return;
     }
-    triggerMutation.mutate({ dateFrom, dateTo, includeOnline });
+    if (isAdmin) {
+      triggerMutation.mutate({ dateFrom, dateTo, includeOnline });
+    } else {
+      // User role: snapshot of current inventory. The server forces
+      // inventory-only mode regardless of these inputs, so today/today is
+      // just a placeholder that satisfies the schema.
+      const today = toLocalDateString(0);
+      triggerMutation.mutate({ dateFrom: today, dateTo: today, includeOnline: true });
+    }
   };
 
   const isRunning = jobData?.job.status === "running" || jobData?.job.status === "pending";
@@ -88,13 +103,17 @@ export default function ExportPage() {
   return (
     <div className="max-w-2xl mx-auto space-y-6 p-2">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Export Data</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          {isAdmin ? "Export Data" : "Inventory Export"}
+        </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Manually trigger a data export for all stores. Transactions and inventory will be exported as separate CSV files.
+          {isAdmin
+            ? "Manually trigger a data export for all stores. Transactions and inventory will be exported as separate CSV files."
+            : "Generate a snapshot of current inventory across all stores as a CSV file."}
         </p>
       </div>
 
-      {!creds && (
+      {isAdmin && !creds && (
         <Card className="border-amber-200 bg-amber-50">
           <CardContent className="pt-4 flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
@@ -111,81 +130,94 @@ export default function ExportPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Download className="w-4 h-4" /> Export Configuration
+            {isAdmin ? <Download className="w-4 h-4" /> : <Boxes className="w-4 h-4" />}
+            {isAdmin ? "Export Configuration" : "Inventory Snapshot"}
           </CardTitle>
           <CardDescription>
-            Select the date range for your export. All stores will be included automatically.
+            {isAdmin
+              ? "Select the date range for your export. All stores will be included automatically."
+              : "All stores are included automatically. The export reflects inventory levels at the time you click Start."}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleExport} className="space-y-5">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="dateFrom">From Date</Label>
-                <Input
-                  id="dateFrom"
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  max={dateTo}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="dateTo">To Date</Label>
-                <Input
-                  id="dateTo"
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  min={dateFrom}
-                  max={toLocalDateString(0)}
-                />
-              </div>
-            </div>
+            {isAdmin && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dateFrom">From Date</Label>
+                    <Input
+                      id="dateFrom"
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      max={dateTo}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dateTo">To Date</Label>
+                    <Input
+                      id="dateTo"
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      min={dateFrom}
+                      max={toLocalDateString(0)}
+                    />
+                  </div>
+                </div>
 
-            {/* Quick date presets */}
-            <div className="flex flex-wrap gap-2">
-              <p className="text-xs text-muted-foreground w-full">Quick presets:</p>
-              {[
-                { label: "Last 7 days", days: 7 },
-                { label: "Last 14 days", days: 14 },
-                { label: "Last 30 days", days: 30 },
-                { label: "Last 90 days", days: 90 },
-              ].map(({ label, days }) => (
-                <Button
-                  key={days}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="text-xs h-7"
-                  onClick={() => {
-                    setDateFrom(toLocalDateString(days));
-                    setDateTo(toLocalDateString(0));
-                  }}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
+                {/* Quick date presets */}
+                <div className="flex flex-wrap gap-2">
+                  <p className="text-xs text-muted-foreground w-full">Quick presets:</p>
+                  {[
+                    { label: "Last 7 days", days: 7 },
+                    { label: "Last 14 days", days: 14 },
+                    { label: "Last 30 days", days: 30 },
+                    { label: "Last 90 days", days: 90 },
+                  ].map(({ label, days }) => (
+                    <Button
+                      key={days}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-xs h-7"
+                      onClick={() => {
+                        setDateFrom(toLocalDateString(days));
+                        setDateTo(toLocalDateString(0));
+                      }}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
 
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <p className="text-sm font-medium">Include Online Orders</p>
-                <p className="text-xs text-muted-foreground">Include transactions from online channels</p>
-              </div>
-              <Switch checked={includeOnline} onCheckedChange={setIncludeOnline} />
-            </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <p className="text-sm font-medium">Include Online Orders</p>
+                    <p className="text-xs text-muted-foreground">Include transactions from online channels</p>
+                  </div>
+                  <Switch checked={includeOnline} onCheckedChange={setIncludeOnline} />
+                </div>
+              </>
+            )}
 
             <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground space-y-1">
               <p className="font-medium text-foreground">What will be exported:</p>
-              <p>• <strong>transactions_{dateFrom}_to_{dateTo}.csv</strong> — All transactions from all stores, labeled with store name</p>
-              <p>• <strong>inventory_{dateFrom}_to_{dateTo}.csv</strong> — Current inventory for all stores, labeled with store name</p>
+              {isAdmin ? (
+                <>
+                  <p>• <strong>transactions_{dateFrom}_to_{dateTo}.csv</strong> — All transactions from all stores, labeled with store name</p>
+                  <p>• <strong>inventory_{dateFrom}_to_{dateTo}.csv</strong> — Current inventory for all stores, labeled with store name</p>
+                </>
+              ) : (
+                <p>• <strong>inventory_*.csv</strong> — Current inventory for all stores, labeled with store name</p>
+              )}
             </div>
 
             <Button
               type="submit"
               className="w-full"
-              disabled={triggerMutation.isPending || isRunning || !creds}
+              disabled={triggerMutation.isPending || isRunning || (isAdmin && !creds)}
             >
               {triggerMutation.isPending || isRunning
                 ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Export in progress...</>
@@ -217,15 +249,17 @@ export default function ExportPage() {
             )}
 
             {jobData.job.status === "completed" && (
-              <div className="grid grid-cols-3 gap-3 text-center">
+              <div className={`grid gap-3 text-center ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
                 <div className="rounded-lg bg-muted p-2">
                   <p className="text-lg font-bold">{jobData.job.storeCount}</p>
                   <p className="text-xs text-muted-foreground">Stores</p>
                 </div>
-                <div className="rounded-lg bg-muted p-2">
-                  <p className="text-lg font-bold">{jobData.job.transactionCount?.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground">Transactions</p>
-                </div>
+                {isAdmin && (
+                  <div className="rounded-lg bg-muted p-2">
+                    <p className="text-lg font-bold">{jobData.job.transactionCount?.toLocaleString()}</p>
+                    <p className="text-xs text-muted-foreground">Transactions</p>
+                  </div>
+                )}
                 <div className="rounded-lg bg-muted p-2">
                   <p className="text-lg font-bold">{jobData.job.inventoryCount?.toLocaleString()}</p>
                   <p className="text-xs text-muted-foreground">Inventory Items</p>

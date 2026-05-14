@@ -1,8 +1,6 @@
 export const ENV = {
   cookieSecret: process.env.JWT_SECRET ?? "",
   databaseUrl: process.env.DATABASE_URL ?? "",
-  appUsername: process.env.APP_USERNAME ?? "",
-  appPassword: process.env.APP_PASSWORD ?? "",
   storehubUsername: process.env.STOREHUB_USERNAME ?? "",
   storehubApiToken: process.env.STOREHUB_API_TOKEN ?? "",
   isProduction: process.env.NODE_ENV === "production",

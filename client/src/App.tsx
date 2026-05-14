@@ -11,6 +11,7 @@ import ExportPage from "./pages/Export";
 import HistoryPage from "./pages/History";
 import LoginPage from "./pages/Login";
 import SchedulerPage from "./pages/Scheduler";
+import UsersPage from "./pages/Users";
 
 function DashboardRoutes() {
   return (
@@ -21,6 +22,7 @@ function DashboardRoutes() {
         <Route path="/export" component={ExportPage} />
         <Route path="/history" component={HistoryPage} />
         <Route path="/scheduler" component={SchedulerPage} />
+        <Route path="/users" component={UsersPage} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
