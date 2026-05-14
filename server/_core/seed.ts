@@ -21,16 +21,21 @@ export async function seedDefaultUsers(): Promise<void> {
     return;
   }
 
-  const email = (process.env.ADMIN_SEED_EMAIL ?? DEFAULT_ADMIN_EMAIL).trim();
+  const email = (process.env.ADMIN_SEED_EMAIL ?? DEFAULT_ADMIN_EMAIL)
+    .trim()
+    .toLowerCase();
   const password = process.env.ADMIN_SEED_PASSWORD ?? DEFAULT_ADMIN_PASSWORD;
 
   try {
+    // openId is derived from the email so changing ADMIN_SEED_EMAIL between
+    // restarts produces a fresh row rather than colliding with the previous
+    // `openId` value on the unique constraint.
     const user = await seedUser({
       email,
       plainPassword: password,
       name: DEFAULT_ADMIN_NAME,
       role: "admin",
-      openId: "seed:admin",
+      openId: `seed:${email}`,
     });
     if (user) {
       console.log(`[Seed] Admin account ready: ${user.email}`);

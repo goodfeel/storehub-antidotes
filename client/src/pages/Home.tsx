@@ -25,13 +25,19 @@ function StatusBadge({ status }: { status: string }) {
 export default function Home() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
+  const isAdmin = user?.role === "admin";
 
-  const { data: creds } = trpc.credentials.get.useQuery();
-  const { data: scheduler } = trpc.scheduler.get.useQuery();
+  // credentials.get and scheduler.get are admin-only on the server; skip them
+  // for regular users to avoid noisy 403s.
+  const { data: creds } = trpc.credentials.get.useQuery(undefined, {
+    enabled: isAdmin,
+  });
+  const { data: scheduler } = trpc.scheduler.get.useQuery(undefined, {
+    enabled: isAdmin,
+  });
   const { data: jobs } = trpc.export.listJobs.useQuery({ limit: 5 });
 
   const recentJobs = jobs ?? [];
-  const lastJob = recentJobs[0];
   const completedJobs = recentJobs.filter((j) => j.status === "completed").length;
   const failedJobs = recentJobs.filter((j) => j.status === "failed").length;
 
@@ -41,44 +47,53 @@ export default function Home() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Welcome back{user?.name ? `, ${user.name}` : ""}. Manage your StoreHub data exports from here.
+          Welcome back{user?.name ? `, ${user.name}` : ""}.{" "}
+          {isAdmin
+            ? "Manage your StoreHub data exports from here."
+            : "Generate inventory exports and review past runs."}
         </p>
       </div>
 
       {/* Status Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className={`border-l-4 ${creds ? "border-l-green-500" : "border-l-amber-500"}`}>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide">
-              <Key className="w-3.5 h-3.5" /> API Credentials
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg font-semibold">{creds ? creds.username : "Not configured"}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{creds ? "Connected" : "Setup required"}</p>
-          </CardContent>
-        </Card>
+      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${isAdmin ? "lg:grid-cols-4" : "lg:grid-cols-2"}`}>
+        {isAdmin && (
+          <Card className={`border-l-4 ${creds?.configured ? "border-l-green-500" : "border-l-amber-500"}`}>
+            <CardHeader className="pb-2">
+              <CardDescription className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide">
+                <Key className="w-3.5 h-3.5" /> API Credentials
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-lg font-semibold">{creds?.configured ? creds.username : "Not configured"}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {creds?.configured ? "Loaded from env" : "Set STOREHUB_* in env"}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
-        <Card className={`border-l-4 ${scheduler?.enabled ? "border-l-blue-500" : "border-l-gray-300"}`}>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide">
-              <Clock className="w-3.5 h-3.5" /> Auto-Scheduler
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg font-semibold">
-              {scheduler?.enabled
-                ? scheduler.frequencyDays === 1 ? "Daily"
-                  : scheduler.frequencyDays === 7 ? "Weekly"
-                  : scheduler.frequencyDays === 30 ? "Monthly"
-                  : `Every ${scheduler.frequencyDays} days`
-                : "Disabled"}
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {scheduler?.enabled ? `At ${String(scheduler.hourOfDay).padStart(2, "0")}:00 GMT+7` : "No scheduled exports"}
-            </p>
-          </CardContent>
-        </Card>
+        {isAdmin && (
+          <Card className={`border-l-4 ${scheduler?.enabled ? "border-l-blue-500" : "border-l-gray-300"}`}>
+            <CardHeader className="pb-2">
+              <CardDescription className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide">
+                <Clock className="w-3.5 h-3.5" /> Auto-Scheduler
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-lg font-semibold">
+                {scheduler?.enabled
+                  ? scheduler.frequencyDays === 1 ? "Daily"
+                    : scheduler.frequencyDays === 7 ? "Weekly"
+                    : scheduler.frequencyDays === 30 ? "Monthly"
+                    : `Every ${scheduler.frequencyDays} days`
+                  : "Disabled"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {scheduler?.enabled ? `At ${String(scheduler.hourOfDay).padStart(2, "0")}:00 GMT+7` : "No scheduled exports"}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="border-l-4 border-l-green-500">
           <CardHeader className="pb-2">
@@ -105,8 +120,9 @@ export default function Home() {
         </Card>
       </div>
 
-      {/* Setup checklist if not configured */}
-      {!creds && (
+      {/* Setup checklist for admins, only when env credentials are missing.
+          Regular users have nothing to configure. */}
+      {isAdmin && creds && !creds.configured && (
         <Card className="border-amber-200 bg-amber-50">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2 text-amber-800">
@@ -118,18 +134,18 @@ export default function Home() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${creds ? "bg-green-500 text-white" : "bg-amber-200 text-amber-800"}`}>
-                {creds ? "✓" : "1"}
+              <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold bg-amber-200 text-amber-800">
+                1
               </div>
               <div className="flex-1">
-                <p className="text-sm font-medium text-amber-900">Configure API Credentials</p>
-                <p className="text-xs text-amber-700">Enter your StoreHub username and API token</p>
+                <p className="text-sm font-medium text-amber-900">Set API Credentials in the environment</p>
+                <p className="text-xs text-amber-700">
+                  Add <code>STOREHUB_USERNAME</code> and <code>STOREHUB_API_TOKEN</code> to the service env, then restart.
+                </p>
               </div>
-              {!creds && (
-                <Button size="sm" onClick={() => setLocation("/credentials")}>
-                  Configure
-                </Button>
-              )}
+              <Button size="sm" onClick={() => setLocation("/credentials")}>
+                Verify
+              </Button>
             </div>
             <div className="flex items-center gap-3">
               <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold bg-amber-200 text-amber-800">2</div>
@@ -210,7 +226,9 @@ export default function Home() {
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {job.status === "completed"
-                          ? `${job.storeCount} stores · ${job.transactionCount} transactions · ${job.inventoryCount} inventory items`
+                          ? isAdmin
+                            ? `${job.storeCount} stores · ${job.transactionCount} transactions · ${job.inventoryCount} inventory items`
+                            : `${job.storeCount} stores · ${job.inventoryCount} inventory items`
                           : job.status === "failed"
                           ? job.errorMessage?.slice(0, 80)
                           : "Processing..."}
