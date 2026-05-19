@@ -22,6 +22,18 @@ import { createExportFile, updateExportJob } from "./db";
 import { getStorehubCredentials } from "./_core/env";
 import { notifyOwner } from "./_core/notification";
 
+/**
+ * Stores whose exact name appears here are filtered out of every export
+ * (transactions, inventory, sales summary).
+ *
+ * Exact match is intentional — "Warehouse Suanluang Square" stays included
+ * because only "Warehouse" matches. Add the literal store name to remove a
+ * location from all CSVs without touching StoreHub itself.
+ */
+const EXCLUDED_STORE_NAMES = new Set<string>([
+  "Warehouse",
+]);
+
 function formatDate(date: Date): string {
   return date.toISOString().split("T")[0]!;
 }
@@ -69,14 +81,24 @@ export async function runExport(options: RunExportOptions): Promise<void> {
 
     // 1. Fetch all stores
     console.log(`[Export ${jobId}] Fetching stores...`);
-    const stores: StoreHubStore[] = await fetchStores(username, apiToken);
-    console.log(`[Export ${jobId}] Found ${stores.length} stores`);
+    const allStores: StoreHubStore[] = await fetchStores(username, apiToken);
+    console.log(`[Export ${jobId}] Found ${allStores.length} stores`);
 
-    if (stores.length === 0) {
+    if (allStores.length === 0) {
       throw new Error("No stores returned from StoreHub API. Please verify your credentials.");
     }
 
-    // Build a storeId → storeName map
+    const excluded = allStores.filter((s) => EXCLUDED_STORE_NAMES.has(s.name));
+    const stores = allStores.filter((s) => !EXCLUDED_STORE_NAMES.has(s.name));
+    if (excluded.length > 0) {
+      console.log(
+        `[Export ${jobId}] Excluding ${excluded.length} store(s) by name: ${excluded
+          .map((s) => `${s.name} (${s.id})`)
+          .join(", ")}`,
+      );
+    }
+
+    // Build a storeId → storeName map (post-filter)
     const storeMap = new Map<string, string>(stores.map((s) => [s.id, s.name]));
 
     // 2. Fetch transactions for all stores (skipped in inventory-only mode)
