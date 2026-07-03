@@ -1,5 +1,10 @@
 import { clearSessionCookie } from "./_core/auth";
-import { ENV, getStorehubCredentials, hasStorehubCredentials } from "./_core/env";
+import {
+  ENV,
+  getStorehubCredentials,
+  hasStorehubCredentials,
+  isGoogleDriveConfigured,
+} from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { z } from "zod";
@@ -96,6 +101,14 @@ export const appRouter = router({
         await upsertSchedulerConfig(ctx.user.id, input);
         return { success: true };
       }),
+
+    /**
+     * Reports whether Google Drive uploads are configured for scheduled
+     * exports. Returns a boolean only — no credentials are exposed.
+     */
+    getDriveStatus: adminProcedure.query(() => {
+      return { configured: isGoogleDriveConfigured() };
+    }),
   }),
 
   // ─── Users (admin-only) ─────────────────────────────────────────────────────

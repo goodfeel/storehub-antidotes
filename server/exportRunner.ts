@@ -18,8 +18,9 @@ import {
   type EnrichedInventoryItem,
 } from "./storehubApi";
 import { storagePut } from "./storage";
+import { uploadFileToDrive } from "./googleDrive";
 import { createExportFile, updateExportJob } from "./db";
-import { getStorehubCredentials } from "./_core/env";
+import { getStorehubCredentials, isGoogleDriveConfigured } from "./_core/env";
 import { notifyOwner } from "./_core/notification";
 
 /**
@@ -75,6 +76,24 @@ export async function runExport(options: RunExportOptions): Promise<void> {
 
   // Mark job as running
   await updateExportJob(jobId, { status: "running" });
+
+  // Google Drive uploads only run for scheduled exports (the "daily export to
+  // Drive" use case). Manual exports stay local-only. Drive links are tracked
+  // per file so the completion notification can surface them.
+  const driveEnabled = triggerType === "scheduled" && isGoogleDriveConfigured();
+  const driveLinks = new Map<string, string | null>();
+
+  async function maybeUploadToDrive(fileName: string, buffer: Buffer): Promise<void> {
+    if (!driveEnabled) return;
+    console.log(`[Export ${jobId}] Uploading ${fileName} to Google Drive...`);
+    const result = await uploadFileToDrive({
+      fileName,
+      mimeType: "text/csv",
+      buffer,
+    });
+    driveLinks.set(fileName, result.webViewLink);
+    console.log(`[Export ${jobId}]   → Drive file ${result.id}`);
+  }
 
   try {
     const { username, apiToken } = getStorehubCredentials();
@@ -173,6 +192,7 @@ export async function runExport(options: RunExportOptions): Promise<void> {
     console.log(`[Export ${jobId}] Uploading inventory CSV (${invBuffer.length} bytes)...`);
     const { url: invUrl } = await storagePut(invKey, invBuffer, "text/csv");
     await createExportFile(jobId, userId, "inventory", invFileName, invUrl, invKey, invBuffer.length);
+    await maybeUploadToDrive(invFileName, invBuffer);
 
     let txFileName: string | null = null;
     let salesFileName: string | null = null;
@@ -201,6 +221,9 @@ export async function runExport(options: RunExportOptions): Promise<void> {
 
       await createExportFile(jobId, userId, "transactions", txFileName, txUrl, txKey, txBuffer.length);
       await createExportFile(jobId, userId, "sales_summary", salesFileName, salesUrl, salesKey, salesBuffer.length);
+
+      await maybeUploadToDrive(txFileName, txBuffer);
+      await maybeUploadToDrive(salesFileName, salesBuffer);
     }
 
     // 8. Mark job completed
@@ -216,15 +239,24 @@ export async function runExport(options: RunExportOptions): Promise<void> {
 
     // 9. Notify owner
     const completedAt = formatDateTimeBangkok(new Date());
-    const fileLines: string[] = [`- ${invFileName}`];
-    if (txFileName) fileLines.push(`- ${txFileName}`);
-    if (salesFileName) fileLines.push(`- ${salesFileName}`);
+    const formatFileLine = (fileName: string): string => {
+      const link = driveLinks.get(fileName);
+      return link ? `- ${fileName} (Drive: ${link})` : `- ${fileName}`;
+    };
+    const fileLines: string[] = [formatFileLine(invFileName)];
+    if (txFileName) fileLines.push(formatFileLine(txFileName));
+    if (salesFileName) fileLines.push(formatFileLine(salesFileName));
+
+    const driveNote = driveEnabled
+      ? `Google Drive: uploaded ${driveLinks.size} file(s) to the shared folder.\n`
+      : "";
 
     await notifyOwner({
       title: `StoreHub Export Completed (${triggerType}${inventoryOnly ? ", inventory-only" : ""})`,
       content: `Export job #${jobId} completed successfully at ${completedAt} (GMT+7).\n\n` +
         `Date range: ${dateFrom} to ${dateTo}\n` +
         `Stores: ${stores.length}\n` +
+        driveNote +
         (inventoryOnly
           ? `Inventory items: ${allInventory.length}\n\n`
           : `Transactions: ${allTransactions.length}\n` +

@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Clock, Save, Loader2, Info, CalendarClock } from "lucide-react";
+import { Clock, Save, Loader2, Info, CalendarClock, Cloud, CloudOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -59,6 +59,7 @@ function nextRunDescription(config: {
 export default function SchedulerPage() {
   const utils = trpc.useUtils();
   const { data: savedConfig, isLoading } = trpc.scheduler.get.useQuery();
+  const { data: driveStatus } = trpc.scheduler.getDriveStatus.useQuery();
 
   const [enabled, setEnabled] = useState(true);
   const [frequencyDays, setFrequencyDays] = useState(7);
@@ -114,6 +115,38 @@ export default function SchedulerPage() {
             </div>
             <Badge className={`ml-auto ${enabled ? "bg-blue-100 text-blue-800 border-blue-200" : "bg-gray-100 text-gray-600"}`}>
               {enabled ? "Active" : "Disabled"}
+            </Badge>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Google Drive destination status */}
+      {driveStatus && (
+        <Card className={driveStatus.configured ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}>
+          <CardContent className="pt-4 flex items-center gap-3">
+            {driveStatus.configured ? (
+              <Cloud className="w-5 h-5 shrink-0 text-green-600" />
+            ) : (
+              <CloudOff className="w-5 h-5 shrink-0 text-amber-600" />
+            )}
+            <div>
+              <p className={`text-sm font-medium ${driveStatus.configured ? "text-green-900" : "text-amber-900"}`}>
+                Google Drive upload
+              </p>
+              <p className={`text-xs mt-0.5 ${driveStatus.configured ? "text-green-700" : "text-amber-700"}`}>
+                {driveStatus.configured
+                  ? "Scheduled exports are uploaded to the configured shared folder."
+                  : "Not configured. Scheduled exports are saved locally only. Set GOOGLE_DRIVE_FOLDER_ID and service-account credentials to enable uploads."}
+              </p>
+            </div>
+            <Badge
+              className={`ml-auto ${
+                driveStatus.configured
+                  ? "bg-green-100 text-green-800 border-green-200"
+                  : "bg-amber-100 text-amber-800 border-amber-200"
+              }`}
+            >
+              {driveStatus.configured ? "Connected" : "Not configured"}
             </Badge>
           </CardContent>
         </Card>
@@ -232,8 +265,8 @@ export default function SchedulerPage() {
             <li>Downloads transactions for each store for the past {frequencyDays} day{frequencyDays > 1 ? "s" : ""}</li>
             <li>Downloads inventory data for each store</li>
             <li>Combines all data into labeled CSV files (one per data type)</li>
-            <li>Uploads the files to secure cloud storage</li>
-            <li>Sends you an email notification with the results</li>
+            <li>Saves the files locally and, when Google Drive is configured, uploads them to the shared folder</li>
+            <li>Records the results in the export history with a completion notification</li>
           </ol>
           <p className="text-xs">
             You can view all scheduled export results in the <strong>Export History</strong> page.
