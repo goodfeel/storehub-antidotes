@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Download, Loader2, CheckCircle2, XCircle, Clock, FileText, AlertCircle, Boxes } from "lucide-react";
+import { Download, Loader2, CheckCircle2, XCircle, Clock, FileText, AlertCircle, Boxes, Cloud } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useLocation } from "wouter";
 
@@ -42,10 +42,12 @@ export default function ExportPage() {
   const { data: creds } = trpc.credentials.get.useQuery(undefined, {
     enabled: isAdmin,
   });
+  const { data: driveStatus } = trpc.scheduler.getDriveStatus.useQuery();
 
   const [dateFrom, setDateFrom] = useState(toLocalDateString(7));
   const [dateTo, setDateTo] = useState(toLocalDateString(0));
   const [includeOnline, setIncludeOnline] = useState(true);
+  const [uploadToDrive, setUploadToDrive] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
 
   const triggerMutation = trpc.export.trigger.useMutation({
@@ -88,13 +90,13 @@ export default function ExportPage() {
       return;
     }
     if (isAdmin) {
-      triggerMutation.mutate({ dateFrom, dateTo, includeOnline });
+      triggerMutation.mutate({ dateFrom, dateTo, includeOnline, uploadToDrive });
     } else {
       // User role: snapshot of current inventory. The server forces
       // inventory-only mode regardless of these inputs, so today/today is
       // just a placeholder that satisfies the schema.
       const today = toLocalDateString(0);
-      triggerMutation.mutate({ dateFrom: today, dateTo: today, includeOnline: true });
+      triggerMutation.mutate({ dateFrom: today, dateTo: today, includeOnline: true, uploadToDrive });
     }
   };
 
@@ -200,6 +202,19 @@ export default function ExportPage() {
                   <Switch checked={includeOnline} onCheckedChange={setIncludeOnline} />
                 </div>
               </>
+            )}
+
+            {driveStatus?.configured && (
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="flex items-start gap-2">
+                  <Cloud className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">Send to Google Drive</p>
+                    <p className="text-xs text-muted-foreground">Also upload the generated CSV files to the shared folder</p>
+                  </div>
+                </div>
+                <Switch checked={uploadToDrive} onCheckedChange={setUploadToDrive} />
+              </div>
             )}
 
             <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground space-y-1">

@@ -69,18 +69,27 @@ export interface RunExportOptions {
    * limited to inventory snapshots.
    */
   inventoryOnly?: boolean;
+  /**
+   * When true, also upload the generated CSVs to Google Drive. Scheduled
+   * exports always upload (when Drive is configured); manual exports only
+   * upload when the user opts in via this flag. Defaults to false.
+   */
+  uploadToDrive?: boolean;
 }
 
 export async function runExport(options: RunExportOptions): Promise<void> {
-  const { jobId, userId, dateFrom, dateTo, includeOnline, triggerType, inventoryOnly } = options;
+  const { jobId, userId, dateFrom, dateTo, includeOnline, triggerType, inventoryOnly, uploadToDrive } = options;
 
   // Mark job as running
   await updateExportJob(jobId, { status: "running" });
 
-  // Google Drive uploads only run for scheduled exports (the "daily export to
-  // Drive" use case). Manual exports stay local-only. Drive links are tracked
-  // per file so the completion notification can surface them.
-  const driveEnabled = triggerType === "scheduled" && isGoogleDriveConfigured();
+  // Scheduled exports always upload to Drive (the "daily export to Drive" use
+  // case); manual exports upload only when the user opts in via `uploadToDrive`.
+  // Either way it requires Drive to be configured. Drive links are tracked per
+  // file so the completion notification can surface them.
+  const driveEnabled =
+    (triggerType === "scheduled" || uploadToDrive === true) &&
+    isGoogleDriveConfigured();
   const driveLinks = new Map<string, string | null>();
 
   async function maybeUploadToDrive(fileName: string, buffer: Buffer): Promise<void> {

@@ -103,10 +103,11 @@ export const appRouter = router({
       }),
 
     /**
-     * Reports whether Google Drive uploads are configured for scheduled
-     * exports. Returns a boolean only — no credentials are exposed.
+     * Reports whether Google Drive uploads are configured. Returns a boolean
+     * only — no credentials are exposed — so it's safe for any authenticated
+     * user (the manual Export page uses it to show the opt-in toggle).
      */
-    getDriveStatus: adminProcedure.query(() => {
+    getDriveStatus: protectedProcedure.query(() => {
       return { configured: isGoogleDriveConfigured() };
     }),
   }),
@@ -226,6 +227,7 @@ export const appRouter = router({
         dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format"),
         dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format"),
         includeOnline: z.boolean().default(true),
+        uploadToDrive: z.boolean().default(false),
       }))
       .mutation(async ({ ctx, input }) => {
         if (!hasStorehubCredentials()) {
@@ -235,6 +237,8 @@ export const appRouter = router({
         }
 
         const inventoryOnly = ctx.user.role !== "admin";
+        // Only honour the Drive opt-in when Drive is actually configured.
+        const uploadToDrive = input.uploadToDrive && isGoogleDriveConfigured();
         const jobId = await createExportJob(ctx.user.id, "manual", input.dateFrom, input.dateTo);
 
         // Run export asynchronously – don't await so the UI gets the jobId immediately
@@ -246,11 +250,12 @@ export const appRouter = router({
           includeOnline: input.includeOnline,
           triggerType: "manual",
           inventoryOnly,
+          uploadToDrive,
         }).catch((err) => {
           console.error(`[Export] Job ${jobId} failed:`, err);
         });
 
-        return { jobId, status: "pending", inventoryOnly };
+        return { jobId, status: "pending", inventoryOnly, uploadToDrive };
       }),
 
     getJob: protectedProcedure

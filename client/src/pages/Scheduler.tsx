@@ -102,8 +102,8 @@ export default function SchedulerPage() {
 
       {/* Next run preview */}
       {!isLoading && (
-        <Card className={enabled ? "border-blue-200 bg-blue-50" : "border-gray-200 bg-gray-50"}>
-          <CardContent className="pt-4 flex items-center gap-3">
+        <Card className={`py-0 gap-0 ${enabled ? "border-blue-200 bg-blue-50" : "border-gray-200 bg-gray-50"}`}>
+          <CardContent className="py-4 flex items-center gap-3">
             <CalendarClock className={`w-5 h-5 shrink-0 ${enabled ? "text-blue-600" : "text-gray-400"}`} />
             <div>
               <p className={`text-sm font-medium ${enabled ? "text-blue-900" : "text-gray-600"}`}>
@@ -122,8 +122,8 @@ export default function SchedulerPage() {
 
       {/* Google Drive destination status */}
       {driveStatus && (
-        <Card className={driveStatus.configured ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}>
-          <CardContent className="pt-4 flex items-center gap-3">
+        <Card className={`py-0 gap-0 ${driveStatus.configured ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
+          <CardContent className="py-4 flex items-center gap-3">
             {driveStatus.configured ? (
               <Cloud className="w-5 h-5 shrink-0 text-green-600" />
             ) : (

@@ -82,8 +82,19 @@ describe("runExport Google Drive integration", () => {
     expect(uploadFileToDrive.mock.calls[0]![0].fileName).toMatch(/^inventory_/);
   });
 
-  it("does NOT upload to Drive for a manual export", async () => {
+  it("does NOT upload to Drive for a manual export by default", async () => {
     await runExport({ ...baseOptions, triggerType: "manual" });
+    expect(uploadFileToDrive).not.toHaveBeenCalled();
+  });
+
+  it("uploads for a manual export when uploadToDrive is opted in", async () => {
+    await runExport({ ...baseOptions, triggerType: "manual", uploadToDrive: true });
+    expect(uploadFileToDrive).toHaveBeenCalledTimes(3);
+  });
+
+  it("does NOT upload for a manual opt-in when Drive is not configured", async () => {
+    vi.mocked(isGoogleDriveConfigured).mockReturnValue(false);
+    await runExport({ ...baseOptions, triggerType: "manual", uploadToDrive: true });
     expect(uploadFileToDrive).not.toHaveBeenCalled();
   });
 
