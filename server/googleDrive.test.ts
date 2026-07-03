@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const { filesCreate, googleAuthCtor, driveCtor } = vi.hoisted(() => ({
+const { filesCreate, filesList, googleAuthCtor, driveCtor } = vi.hoisted(() => ({
   filesCreate: vi.fn(),
+  filesList: vi.fn(),
   googleAuthCtor: vi.fn(),
   driveCtor: vi.fn(),
 }));
@@ -37,10 +38,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   __resetDriveClientForTests();
   googleAuthCtor.mockImplementation(() => ({ __fakeAuth: true }));
-  driveCtor.mockReturnValue({ files: { create: filesCreate } });
+  driveCtor.mockReturnValue({ files: { create: filesCreate, list: filesList } });
   filesCreate.mockResolvedValue({
     data: { id: "file-1", name: "test.csv", webViewLink: "https://drive.google.com/file-1" },
   });
+  // Default: no existing folders found → callers will create them.
+  filesList.mockResolvedValue({ data: { files: [] } });
 });
 
 describe("uploadFileToDrive", () => {
@@ -98,6 +101,67 @@ describe("uploadFileToDrive", () => {
         buffer: Buffer.from("x"),
       })
     ).rejects.toThrow(/did not return a file ID/i);
+  });
+
+  it("creates the YYYY/MM/DD folder path and uploads into the leaf folder", async () => {
+    // Folder create returns unique IDs per segment; final call is the file.
+    filesCreate
+      .mockResolvedValueOnce({ data: { id: "year-id" } })
+      .mockResolvedValueOnce({ data: { id: "month-id" } })
+      .mockResolvedValueOnce({ data: { id: "day-id" } })
+      .mockResolvedValueOnce({
+        data: { id: "file-x", name: "inv.csv", webViewLink: "https://drive.google.com/file-x" },
+      });
+
+    await uploadFileToDrive({
+      fileName: "inv.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("x"),
+      subfolders: ["2026", "07", "04"],
+    });
+
+    // 3 folder lookups (all miss) + creates.
+    expect(filesList).toHaveBeenCalledTimes(3);
+
+    const folderCreates = filesCreate.mock.calls.filter(
+      (c) => c[0].requestBody.mimeType === "application/vnd.google-apps.folder"
+    );
+    expect(folderCreates.map((c) => c[0].requestBody.name)).toEqual(["2026", "07", "04"]);
+    // Year under root, month under year, day under month.
+    expect(folderCreates[0]![0].requestBody.parents).toEqual(["folder-123"]);
+    expect(folderCreates[1]![0].requestBody.parents).toEqual(["year-id"]);
+    expect(folderCreates[2]![0].requestBody.parents).toEqual(["month-id"]);
+
+    // The file lands in the day folder.
+    const fileCreate = filesCreate.mock.calls.find(
+      (c) => c[0].requestBody.mimeType !== "application/vnd.google-apps.folder"
+    );
+    expect(fileCreate![0].requestBody.parents).toEqual(["day-id"]);
+  });
+
+  it("reuses existing date folders when they already exist", async () => {
+    filesList
+      .mockResolvedValueOnce({ data: { files: [{ id: "year-existing" }] } })
+      .mockResolvedValueOnce({ data: { files: [{ id: "month-existing" }] } })
+      .mockResolvedValueOnce({ data: { files: [{ id: "day-existing" }] } });
+
+    await uploadFileToDrive({
+      fileName: "inv.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("x"),
+      subfolders: ["2026", "07", "04"],
+    });
+
+    // No folders created — only the file.
+    const folderCreates = filesCreate.mock.calls.filter(
+      (c) => c[0].requestBody.mimeType === "application/vnd.google-apps.folder"
+    );
+    expect(folderCreates).toHaveLength(0);
+
+    const fileCreate = filesCreate.mock.calls.find(
+      (c) => c[0].requestBody.mimeType !== "application/vnd.google-apps.folder"
+    );
+    expect(fileCreate![0].requestBody.parents).toEqual(["day-existing"]);
   });
 
   it("returns null webViewLink when Drive omits it", async () => {

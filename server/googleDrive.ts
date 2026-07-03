@@ -23,6 +23,9 @@
  *   - `GOOGLE_DRIVE_ENABLED`       → optional kill switch
  *
  * Store `GOOGLE_DRIVE_PRIVATE_KEY` as a secret env var in production.
+ *
+ * Uploaded files are organised into date subfolders `YYYY/MM/DD` under the
+ * configured root folder (created on demand).
  */
 
 import { Readable } from "node:stream";
@@ -54,7 +57,12 @@ function loadCredentials(): ServiceAccountCredentials | null {
   };
 }
 
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+
 let cachedClient: drive_v3.Drive | null = null;
+// Caches resolved folder IDs keyed by `${parentId}/${name}` so repeated uploads
+// on the same day don't re-query/re-create the date folders.
+const folderCache = new Map<string, string>();
 
 /**
  * Returns an authenticated Drive v3 client. Throws if credentials are missing
@@ -82,12 +90,80 @@ export async function getDriveClient(): Promise<drive_v3.Drive> {
   return cachedClient;
 }
 
+/**
+ * Finds a direct child folder by name under `parentId`, creating it if it
+ * doesn't exist. Results are cached for the process lifetime.
+ */
+async function findOrCreateFolder(
+  drive: drive_v3.Drive,
+  parentId: string,
+  name: string
+): Promise<string> {
+  const cacheKey = `${parentId}/${name}`;
+  const cached = folderCache.get(cacheKey);
+  if (cached) return cached;
+
+  const escapedName = name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const list = await drive.files.list({
+    q: `name = '${escapedName}' and '${parentId}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`,
+    fields: "files(id, name)",
+    pageSize: 1,
+    spaces: "drive",
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  const existing = list.data.files?.[0];
+  if (existing?.id) {
+    folderCache.set(cacheKey, existing.id);
+    return existing.id;
+  }
+
+  const created = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name,
+      mimeType: FOLDER_MIME,
+      parents: [parentId],
+    },
+    fields: "id",
+  });
+
+  const id = created.data.id;
+  if (!id) {
+    throw new Error(`Failed to create Google Drive folder "${name}".`);
+  }
+  folderCache.set(cacheKey, id);
+  return id;
+}
+
+/**
+ * Walks/creates a nested folder path under `rootId` and returns the leaf
+ * folder ID. e.g. segments `["2026", "07", "04"]` → `<root>/2026/07/04`.
+ */
+async function ensureFolderPath(
+  drive: drive_v3.Drive,
+  rootId: string,
+  segments: string[]
+): Promise<string> {
+  let parent = rootId;
+  for (const segment of segments) {
+    parent = await findOrCreateFolder(drive, parent, segment);
+  }
+  return parent;
+}
+
 export interface UploadFileOptions {
   fileName: string;
   mimeType: string;
   buffer: Buffer;
   /** Defaults to `ENV.googleDriveFolderId`. */
   folderId?: string;
+  /**
+   * Optional nested subfolder path (relative to `folderId`) to place the file
+   * in. Each segment is created if missing. e.g. `["2026", "07", "04"]`.
+   */
+  subfolders?: string[];
 }
 
 export interface UploadFileResult {
@@ -106,7 +182,7 @@ export interface UploadFileResult {
 export async function uploadFileToDrive(
   options: UploadFileOptions
 ): Promise<UploadFileResult> {
-  const { fileName, mimeType, buffer } = options;
+  const { fileName, mimeType, buffer, subfolders } = options;
   const folderId = (options.folderId ?? ENV.googleDriveFolderId).trim();
 
   if (!folderId) {
@@ -117,11 +193,16 @@ export async function uploadFileToDrive(
 
   const drive = await getDriveClient();
 
+  const targetFolderId =
+    subfolders && subfolders.length > 0
+      ? await ensureFolderPath(drive, folderId, subfolders)
+      : folderId;
+
   const res = await drive.files.create({
     supportsAllDrives: true,
     requestBody: {
       name: fileName,
-      parents: [folderId],
+      parents: [targetFolderId],
     },
     media: {
       mimeType,
@@ -138,7 +219,8 @@ export async function uploadFileToDrive(
   return { id, name: name ?? fileName, webViewLink: webViewLink ?? null };
 }
 
-/** Test seam: clears the cached Drive client. */
+/** Test seam: clears the cached Drive client and folder cache. */
 export function __resetDriveClientForTests(): void {
   cachedClient = null;
+  folderCache.clear();
 }

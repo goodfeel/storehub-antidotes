@@ -56,6 +56,17 @@ function randomSuffix(): string {
   return Math.random().toString(36).substring(2, 8);
 }
 
+/**
+ * Returns the [YYYY, MM, DD] parts of `date` in Bangkok time, used to build the
+ * Google Drive date folder path (e.g. 2026/07/04). `en-CA` formats as
+ * zero-padded `YYYY-MM-DD`.
+ */
+function bangkokDateSegments(date: Date): string[] {
+  return date
+    .toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" })
+    .split("-");
+}
+
 export interface RunExportOptions {
   jobId: number;
   userId: number;
@@ -91,14 +102,19 @@ export async function runExport(options: RunExportOptions): Promise<void> {
     (triggerType === "scheduled" || uploadToDrive === true) &&
     isGoogleDriveConfigured();
   const driveLinks = new Map<string, string | null>();
+  // Group uploads into a YYYY/MM/DD folder path based on the run date.
+  const driveSubfolders = bangkokDateSegments(new Date());
 
   async function maybeUploadToDrive(fileName: string, buffer: Buffer): Promise<void> {
     if (!driveEnabled) return;
-    console.log(`[Export ${jobId}] Uploading ${fileName} to Google Drive...`);
+    console.log(
+      `[Export ${jobId}] Uploading ${fileName} to Google Drive (${driveSubfolders.join("/")})...`
+    );
     const result = await uploadFileToDrive({
       fileName,
       mimeType: "text/csv",
       buffer,
+      subfolders: driveSubfolders,
     });
     driveLinks.set(fileName, result.webViewLink);
     console.log(`[Export ${jobId}]   → Drive file ${result.id}`);
